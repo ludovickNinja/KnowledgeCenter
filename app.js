@@ -9,21 +9,43 @@
 
   /* ---------- state ---------- */
   const clone = o => JSON.parse(JSON.stringify(o));
+  // Documents and queue items are compiled from content/ by scripts/build_content.py into content.js.
+  const C = window.KC_CONTENT || { docs: [], ongoing: [], build: 'none' };
+  const REPO = 'https://github.com/ludovickNinja/KnowledgeCenter';
+  const ghView = p => `${REPO}/blob/main/${p}`, ghEdit = p => `${REPO}/edit/main/${p}`;
+  const ext = 'target="_blank" rel="noopener"';
   const defaultState = () => ({
     user: 'maya',
+    build: C.build,
     progress: clone(D.SEED_PROGRESS),
     requests: clone(D.SEED_REQUESTS),
-    docs: clone(D.DOCS),
-    ongoing: clone(D.ONGOING),
+    docs: clone(C.docs),
+    ongoing: clone(C.ongoing),
     deptOverride: {},
   });
   let S;
-  const load = () => { try { S = JSON.parse(localStorage.getItem(LS_KEY)) || defaultState(); } catch { S = defaultState(); } if (!S.docs) S = defaultState(); };
+  const load = () => {
+    try { S = JSON.parse(localStorage.getItem(LS_KEY)) || defaultState(); } catch { S = defaultState(); }
+    if (!S.docs) S = defaultState();
+    // Content was rebuilt since this browser last visited: take the fresh documents, keep progress and requests.
+    if (S.build !== C.build) { S.docs = clone(C.docs); S.ongoing = clone(C.ongoing); S.build = C.build; save(); }
+  };
   const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch {} };
   const UI = { modal: null, quiz: {}, quizResult: null, knowQuery: '', knowCat: '', chat: {}, manageTab: 'overview', toast: null, teamMember: null, askDraft: '' };
 
   /* ---------- helpers ---------- */
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Minimal Markdown for section bodies: paragraphs, bullet lists, **bold**, *italic*, [links](url). Escapes first.
+  const inlineMd = s => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|#[^)\s]*)\)/g, (m, t, u) => `<a href="${u}"${u.startsWith('http') ? ` ${ext}` : ''}>${t}</a>`);
+  const md = src => String(src || '').replace(/\r/g, '').split(/\n\s*\n/).filter(b => b.trim()).map(b => {
+    const lines = b.split('\n');
+    if (lines.every(l => /^\s*[-*]\s+/.test(l))) return `<ul>${lines.map(l => `<li>${inlineMd(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+    return `<p>${inlineMd(lines.join(' '))}</p>`;
+  }).join('');
+  const txt = s => s.text || s.p || '';
   const fmtDate = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
   const initials = n => n.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase();
   const deptName = id => id === 'all' ? 'Everyone' : (D.DEPARTMENTS[id]?.short || id);
@@ -59,7 +81,7 @@
       const v = currentVersion(doc);                      // never archived / draft
       const titleT = tokens(doc.title + ' ' + doc.tags.join(' '));
       v.sections.forEach((sec, i) => {
-        const headT = tokens(sec.h), bodyT = tokens(sec.p);
+        const headT = tokens(sec.h), bodyT = tokens(txt(sec));
         let score = 0, matched = 0;
         q.forEach(t => {
           let s = 0;
@@ -77,7 +99,7 @@
     const need = q.length === 1 ? 1 : Math.max(2, Math.ceil(q.length * 0.5));
     if (!best || best.matched < need || best.score < 3) return { found: false, q, near: hits.filter(h => h.matched >= 2).slice(0, 2) };
     const supporting = hits.filter(h => h !== best && h.matched >= need && h.score >= 3).slice(0, 2);
-    const sentences = best.sec.p.match(/[^.!?]+[.!?]+/g) || [best.sec.p];
+    const sentences = txt(best.sec).match(/[^.!?]+[.!?]+/g) || [txt(best.sec)];
     return { found: true, q, best, answer: sentences.slice(0, 2).join(' ').trim(), supporting };
   }
 
@@ -201,11 +223,11 @@
       ${rec ? `<span class="badge ok">✓ Completed ${fmtDate(rec.date)}${rec.version ? ` · v${rec.version}` : ''}</span>` : `<span class="badge">${m.minutes} min</span>`}</div>
     <div class="grid side-r">
       <div class="card doc">
-        ${isOngoing ? `<div class="diff-box mb"><div class="lbl">What changed · v${prev ? prev.v + ' → ' : ''}v${m.version} · ${fmtDate(ver.date)}</div>${esc(ver.summary)}${prev && prev.sections.length ? `<details class="mt-s small"><summary>Compare with v${prev.v}</summary><div class="mt-s">${prev.sections.map(s => `<p><strong>${esc(s.h)}</strong> — ${esc(s.p)}</p>`).join('')}</div></details>` : ''}</div>` : ''}
+        ${isOngoing ? `<div class="diff-box mb"><div class="lbl">What changed · v${prev ? prev.v + ' → ' : ''}v${m.version} · ${fmtDate(ver.date)}</div>${esc(ver.summary)}${prev && prev.sections.length ? `<details class="mt-s small"><summary>Compare with v${prev.v}</summary><div class="mt-s">${prev.sections.map(s => `<p><strong>${esc(s.h)}</strong> — ${esc(txt(s))}</p>`).join('')}</div></details>` : ''}</div>` : ''}
         ${!ver || !ver.sections.length ? `<div class="notice warn">This content is no longer published. The module remains in your record.</div>` : `
         <div class="row spread mb"><div class="small muted">From the knowledge base: <a href="#/know/${doc.id}">${esc(doc.title)}</a> · v${ver.v} · ${esc(doc.owner)}</div><span class="badge ${ver.status === 'published' ? 'ok' : ''}">${ver.status}</span></div>
-        ${ver.sections.map(s => `<section><h3>${esc(s.h)}</h3><p>${esc(s.p)}</p></section>`).join('')}`}
-        ${(m.docs || []).slice(1).map(d => { const dd = docById(d), vv = currentVersion(dd); return vv ? `<hr><div class="small muted mb">Also from: <a href="#/know/${dd.id}">${esc(dd.title)}</a></div>${vv.sections.map(s => `<section><h3>${esc(s.h)}</h3><p>${esc(s.p)}</p></section>`).join('')}` : ''; }).join('')}
+        ${ver.sections.map(s => `<section><h3>${esc(s.h)}</h3>${md(s.p)}</section>`).join('')}`}
+        ${(m.docs || []).slice(1).map(d => { const dd = docById(d), vv = currentVersion(dd); return vv ? `<hr><div class="small muted mb">Also from: <a href="#/know/${dd.id}">${esc(dd.title)}</a></div>${vv.sections.map(s => `<section><h3>${esc(s.h)}</h3>${md(s.p)}</section>`).join('')}` : ''; }).join('')}
       </div>
       <div class="stack">
         <div class="card">
@@ -236,8 +258,8 @@
       let hit = !q, snippet = '';
       if (q) {
         if (d.title.toLowerCase().includes(q) || d.tags.some(t => t.includes(q))) hit = true;
-        const sec = v.sections.find(s => (s.h + ' ' + s.p).toLowerCase().includes(q));
-        if (sec) { hit = true; const i = sec.p.toLowerCase().indexOf(q); snippet = (i > 60 ? '…' : '') + sec.p.slice(Math.max(0, i - 60), i + 120) + '…'; }
+        const sec = v.sections.find(s => (s.h + ' ' + txt(s)).toLowerCase().includes(q));
+        if (sec) { hit = true; const t = txt(sec), i = t.toLowerCase().indexOf(q); snippet = (i > 60 ? '…' : '') + t.slice(Math.max(0, i - 60), i + 120) + '…'; }
       }
       return { d, v, hit, snippet };
     }).filter(x => x.hit);
@@ -247,7 +269,7 @@
     ${scored.length ? `<div class="grid cols-3">${scored.map(({ d, v, snippet }) => `<a class="card doc-card" href="#/know/${d.id}">
         <div class="cat">${cat(d.category).icon} ${esc(cat(d.category).name)}</div>
         <div class="title">${highlight(d.title, UI.knowQuery.trim())}</div>
-        <div class="small muted">${snippet ? highlight(snippet, UI.knowQuery.trim()) : esc(v.sections[0]?.p.slice(0, 110) + '…')}</div>
+        <div class="small muted">${snippet ? highlight(snippet, UI.knowQuery.trim()) : esc(txt(v.sections[0] || {}).slice(0, 110) + '…')}</div>
         <div class="row mt-s"><span class="badge">v${v.v} · ${fmtDate(v.date)}</span><span class="badge">${esc(deptList(d.depts))}</span></div>
       </a>`).join('')}</div>` : `<div class="card empty">No documents match. <button class="btn ghost" data-action="open-request" data-prefill="${esc(UI.knowQuery)}">Request this topic be documented →</button></div>`}`;
   }
@@ -270,7 +292,8 @@
         <div class="row small muted mb">
           <span>v${ver.v} · ${ver.status === 'published' ? 'Published' : ver.status} ${fmtDate(ver.date)}</span><span>·</span><span>Owner: ${esc(d.owner)}</span><span>·</span><span>Visible to: ${esc(deptList(d.depts))}</span>
         </div>
-        ${ver.sections.map((s, i) => `<section id="s${i}" class="${hl == i ? 'hl' : ''}"><h3>${esc(s.h)}</h3><p>${esc(s.p)}</p></section>`).join('')}
+        ${ver.sections.map((s, i) => `<section id="s${i}" class="${hl == i ? 'hl' : ''}"><h3>${esc(s.h)}</h3>${md(s.p)}</section>`).join('')}
+        ${user.role === 'admin' && ver.status === 'published' ? `<div class="tiny muted mt">Source: <a href="${ghView(`content/current/${d.id}.md`)}" ${ext}>content/current/${esc(d.id)}.md</a> · <a href="${ghEdit(`content/current/${d.id}.md`)}" ${ext}>edit on GitHub</a></div>` : ''}
       </div>
       <div class="stack">
         <div class="card flat"><h3>On this page</h3><div class="toc">${ver.sections.map((s, i) => `<a href="#s${i}" data-action="scroll" data-id="s${i}">${esc(s.h)}</a>`).join('')}</div></div>
@@ -374,9 +397,9 @@
     <div class="grid cols-2">
       <div class="card"><h3>Publishing workflow</h3>
         <ol class="small" style="padding-left:18px;margin:8px 0 0;line-height:1.8">
-          <li><strong>SME submits</strong> content (Word) to the restricted <em>Master documents</em> folder and is accountable for accuracy.</li>
+          <li><strong>SME submits</strong> content as a file in <span class="mono">content/drafts/</span> and is accountable for accuracy.</li>
           <li><strong>L&D reviews</strong> for framework, writing standards, organization and labels (category, departments).</li>
-          <li><strong>Publish</strong> a new version. The previous version moves to the restricted <em>Archived</em> folder.</li>
+          <li><strong>Publish</strong> by commit: the previous file moves to <span class="mono">content/archive/</span>, the new one becomes <span class="mono">content/current/</span>. The build validates it and the site updates.</li>
           <li><strong>Decide</strong> whether the change is substantive. Only substantive changes create Ongoing Learning items, with a change summary shown in the queue.</li>
           <li>Completion records keep the version each employee saw.</li>
         </ol></div>
@@ -400,12 +423,14 @@
   }
   function manageFolders() {
     const cur = S.docs.filter(currentVersion).length, arch = S.docs.reduce((n, d) => n + d.versions.filter(v => v.status === 'archived').length, 0);
-    return `<p class="muted small mb">Mirrors the SharePoint structure, with version history, labels and completion records layered on top.</p>
+    const drafts = S.docs.filter(pendingVersion).length;
+    return `<p class="muted small mb">Documents live as Markdown files in the repository's <a href="${ghView('content')}" ${ext}>content/</a> folder, mirroring the SharePoint structure. A build step compiles them into the site on every commit. <a href="${ghView('content/README.md')}" ${ext}>Authoring guide</a></p>
     <div class="grid cols-3">
-      <div class="card folder locked"><div class="ico">🔒</div><div><h3>Master documents</h3><div class="small muted">Restricted: L&D and SMEs. Editable Word sources for every document.</div><div class="row mt-s"><span class="badge">${S.docs.length} files</span><span class="badge warn">Restricted</span></div></div></div>
-      <div class="card folder locked"><div class="ico">🗄️</div><div><h3>Archived versions</h3><div class="small muted">Restricted: L&D. Every superseded version, kept so completion records remain auditable. Never indexed by Ask.</div><div class="row mt-s"><span class="badge">${arch} versions</span><span class="badge warn">Restricted</span></div></div></div>
-      <div class="card folder open"><div class="ico">📂</div><div><h3>Current versions</h3><div class="small muted">All access. One published version per document, filtered by department label in Know, Ask and Learn.</div><div class="row mt-s"><span class="badge">${cur} published</span><span class="badge ok">All access</span></div></div></div>
+      <div class="card folder locked"><div class="ico">📝</div><div><h3>Drafts</h3><div class="small muted"><span class="mono">content/drafts/</span><br>SME submissions waiting for L&D review. Not visible in Know, Ask or Learn.</div><div class="row mt-s"><span class="badge">${drafts} waiting</span><span class="badge warn">Restricted</span></div></div></div>
+      <div class="card folder locked"><div class="ico">🗄️</div><div><h3>Archived versions</h3><div class="small muted"><span class="mono">content/archive/&lt;id&gt;/v&lt;N&gt;.md</span><br>Every superseded version, kept so completion records stay auditable. Never indexed by Ask.</div><div class="row mt-s"><span class="badge">${arch} versions</span><span class="badge warn">Restricted</span></div></div></div>
+      <div class="card folder open"><div class="ico">📂</div><div><h3>Current versions</h3><div class="small muted"><span class="mono">content/current/&lt;id&gt;.md</span><br>One published version per document, filtered by department label in Know, Ask and Learn.</div><div class="row mt-s"><span class="badge">${cur} published</span><span class="badge ok">All access</span></div></div></div>
     </div>
+    <div class="notice small mt">In the repository, Git history is the master record and the restricted folders are a convention. In the SharePoint version the master Word files would sit in a restricted library and be converted to this format on publish.</div>
     <div class="card mt"><h3>Labels</h3><p class="small muted">Every document carries a category and one or more department labels. Labels act as a filter for what each employee sees. They never change the content.</p>
       <table><thead><tr><th>Department</th><th>Documents visible</th></tr></thead><tbody>
       ${Object.values(D.DEPARTMENTS).map(dp => `<tr><td>${esc(dp.name)}</td><td class="small">${S.docs.filter(d => currentVersion(d) && (d.depts.includes('all') || d.depts.includes(dp.id))).length} (incl. company-wide)</td></tr>`).join('')}
@@ -450,10 +475,11 @@
         ${c.length ? `<div class="tiny muted mt-s">Completed on this version: ${esc(c.join(', '))}</div>` : (v.status === 'published' || v.status === 'archived' ? `<div class="tiny muted mt-s">No completion records on this version.</div>` : '')}
       </div>`; }).join('')}</div></div>
       <div class="stack">
-        <div class="card flat"><h3>Folder locations</h3><div class="small stack mt-s">
-          <div class="lock-note">🔒 Master documents / ${esc(d.id)}.docx</div>
-          <div class="lock-note">🗄️ Archived / ${esc(d.id)} / ${d.versions.filter(v => v.status === 'archived').map(v => 'v' + v.v).join(', ') || 'none'}</div>
-          <div class="lock-note">📂 Current / ${cur ? `${esc(d.id)}-v${cur.v}` : 'not published'}</div></div></div>
+        <div class="card flat"><h3>Source files</h3><div class="small stack mt-s">
+          ${cur ? `<div class="lock-note">📂 <a href="${ghView(`content/current/${d.id}.md`)}" ${ext}>content/current/${esc(d.id)}.md</a> · <a href="${ghEdit(`content/current/${d.id}.md`)}" ${ext}>edit</a></div>` : '<div class="lock-note">📂 content/current/ — not published</div>'}
+          ${d.versions.filter(v => v.status === 'archived').map(v => `<div class="lock-note">🗄️ <a href="${ghView(`content/archive/${d.id}/v${v.v}.md`)}" ${ext}>content/archive/${esc(d.id)}/v${v.v}.md</a></div>`).join('') || '<div class="lock-note">🗄️ content/archive/ — none</div>'}
+          ${pend ? `<div class="lock-note">📝 <a href="${ghView(`content/drafts/${d.id}.md`)}" ${ext}>content/drafts/${esc(d.id)}.md</a> · <a href="${ghEdit(`content/drafts/${d.id}.md`)}" ${ext}>edit</a></div>` : ''}
+          <div class="muted tiny mt-s">Edit on GitHub and commit; the build validates and publishes within a minute. <a href="${ghView('content/README.md')}" ${ext}>Authoring guide</a></div></div></div>
         <div class="card flat small"><strong>Queue items from this document</strong>${S.ongoing.filter(o => o.docId === d.id).map(o => `<div class="mt-s"><a href="#/learn/${o.id}">${esc(o.title)}</a><div class="tiny muted">v${o.version} · ${esc(deptList(o.depts))} · ${D.USERS.filter(u => isDone(u.id, o.id)).length} completed</div></div>`).join('') || '<div class="muted mt-s">None</div>'}</div>
       </div>
     </div>`;
@@ -474,6 +500,7 @@
       const nextV = pend ? pend.v : Math.max(...d.versions.map(v => v.v)) + 1;
       body = `<h2>Publish ${esc(d.title)} · v${nextV}</h2>
       <p class="small muted">${cur ? `v${cur.v} will move to the restricted Archived folder. Employees who completed v${cur.v} keep that record.` : 'This document is currently unpublished.'}</p>
+      <div class="notice warn small mb">Demo only: this publishes in your browser. The real publish is a commit that moves <span class="mono">content/current/${esc(d.id)}.md</span> to <span class="mono">content/archive/${esc(d.id)}/v${cur ? cur.v : 1}.md</span> and adds the new current file. <a href="${ghView('content/README.md#publishing-a-new-version-ld')}" ${ext}>How to publish</a></div>
       <form data-submit="publish" data-id="${d.id}" data-pending="${pend ? pend.v : ''}">
         <div class="field"><label>Change summary (shown to employees in their queue)</label><textarea name="summary" rows="3" required placeholder="What changed and why it matters, in one or two sentences.">${esc(pend?.summary || '')}</textarea></div>
         <div class="field"><label>Type of change</label>

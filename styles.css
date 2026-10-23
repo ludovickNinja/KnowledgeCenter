@@ -135,6 +135,8 @@ main { max-width: 1180px; margin: 0 auto; padding: 28px 16px 90px; }
 .doc { max-width: 760px; }
 .doc section { margin-bottom: 22px; }
 .doc section h3 { font-size: 17px; margin-bottom: 6px; }
+.doc section ul { margin: 0 0 .8em; padding-left: 20px; }
+.doc section p:last-child, .doc section ul:last-child { margin-bottom: 0; }
 .doc section.hl { background: var(--accent-soft); margin: 0 -14px 22px; padding: 12px 14px; border-radius: 8px; }
 .toc a { display: block; padding: 5px 0; color: var(--muted); text-decoration: none; font-size: 14px; }
 .toc a:hover { color: var(--text); }

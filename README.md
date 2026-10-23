@@ -18,16 +18,42 @@ and L&D. "Reset demo data" in the footer restores the seed state.
 | **My Team** (supervisor / L&D) | Completion by stage per team member, down to which version each person completed. |
 | **Suggest a topic** | Available to every persona; submissions land in the Manage request inbox. |
 
+## Where the documents come from
+
+Every document is a Markdown file in [`content/`](content/) with a metadata header. A build step
+compiles them into `content.js`, which the site loads. The folder mirrors the framework's structure:
+
+```
+content/current/<id>.md         the one published version of each document (all access)
+content/archive/<id>/v<N>.md    superseded versions, content retained (restricted)
+content/drafts/<id>.md          SME submissions waiting for L&D review
+```
+
+GitHub Actions runs the build on every push to `main` that touches `content/` and commits the
+result, so editing a file on GitHub and committing is enough to update the live site. The build
+fails on invalid metadata (unknown category or department, missing field, duplicate version), so a
+bad file never reaches the site. See [`content/README.md`](content/README.md) for the authoring guide.
+
+Modules, quizzes, personas and seed progress still live in `data.js`.
+
 ## Files
 
 - `index.html` — entry point
 - `app.js` — routing, views, state
-- `data.js` — mock documents, versions, modules, personas
+- `content.js` — generated from `content/` (do not edit by hand)
+- `data.js` — modules, quizzes, personas, seed progress
+- `scripts/build_content.py` — compiles `content/` into `content.js`
 - `styles.css` — styling (light and dark)
 
 ## Run locally
 
-Any static server works, for example:
+```bash
+python -m pip install pyyaml
+```
+
+```bash
+python scripts/build_content.py
+```
 
 ```bash
 python -m http.server 8765
